@@ -88,11 +88,39 @@ Rectangle {
         return false;
     }
 
+    // The FLV endpoint streams ONE recording file per connection, and events
+    // are separate files — continuous footage EOFs at every event boundary.
+    // Reopen at the next second when footage continues past the playhead.
+    property real _lastAutoResume: -10
+    property bool _suppressResume: false
+
+    Connections {
+        target: player
+        function onStateChanged() {
+            if (player.state !== StreamPlayer.Stopped)
+                return;
+            // Deferred: stop() fires synchronously inside playAtSecs()'s own
+            // stop-then-start; re-entering from here would double-start.
+            Qt.callLater(function () {
+                if (player.state !== StreamPlayer.Stopped || !root.visible
+                    || !root.hasSource || root._suppressResume)
+                    return;
+                if (!root.covered(root.playheadSecs + 1))
+                    return;
+                if (root.playheadSecs <= root._lastAutoResume + 2)
+                    return;
+                root._lastAutoResume = root.playheadSecs;
+                root.playAtSecs(root.playheadSecs + 1, root.epochOf(root.playheadSecs + 1));
+            });
+        }
+    }
+
     // Play this camera from the given moment (epoch = wall-clock seconds).
     // A gap is a normal outcome, not an error: stop and let the overlay say so.
     function playAtSecs(sec, epoch) {
         if (!hasSource)
             return;
+        _suppressResume = false;
         if (!covered(sec)) {
             player.stop();
             return;
@@ -110,11 +138,14 @@ Rectangle {
         player.start();
     }
 
-    function stopPlayback() { player.stop(); }
+    function stopPlayback() {
+        _suppressResume = true; // an ordered stop must stay stopped
+        player.stop();
+    }
 
     // A pane that leaves the layout (loses its slot, or its page/grid hides)
     // must not keep a playback stream open on the connection-limited NVR.
-    onVisibleChanged: if (!visible) player.stop()
+    onVisibleChanged: if (!visible) { _suppressResume = true; player.stop(); }
 
     // Retry on connection error: NVRs are connection-limited and may
     // momentarily refuse a playback stream while others are opening.

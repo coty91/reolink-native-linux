@@ -229,7 +229,7 @@ Item {
     // False when the Playback page isn't on screen — stop streaming so a Baichuan
     // session (or FLV stream) isn't left running on the connection-limited NVR.
     property bool active: true
-    onActiveChanged: if (!active) { player.stop(); stopAllPanes(); }
+    onActiveChanged: if (!active) { _suppressResume = true; player.stop(); stopAllPanes(); }
 
     // Advance the playhead in realtime while streaming, so the timeline cursor
     // tracks the current position (and play/pause resumes from where you are).
@@ -269,8 +269,42 @@ Item {
         }
         return false;
     }
+    // The NVR's FLV endpoint streams ONE recording file per connection, and
+    // motion events are stored as separate files — so continuous footage ends
+    // in an EOF exactly at each event boundary, killing playback right at the
+    // red marker. When the stream ends but footage continues past the playhead,
+    // reopen at the next second instead of giving up.
+    property real _lastAutoResume: -10
+    property bool _suppressResume: false   // a user Stop must stay stopped
+
+    Connections {
+        target: player
+        function onStateChanged() {
+            if (player.state !== StreamPlayer.Stopped)
+                return;
+            // Deferred: stop() fires synchronously inside playAt()'s own
+            // stop-then-start sequence, and re-entering playAt from here
+            // would start the stream twice.
+            Qt.callLater(function () {
+                if (player.state !== StreamPlayer.Stopped || !page.active
+                    || page.paneCount !== 1 || page._suppressResume)
+                    return;
+                // The +1 nudge lands inside the NEXT file — replaying the exact
+                // boundary second would resolve to the file that just ended.
+                if (!page.inRecording(page.playheadSecs + 1))
+                    return;
+                // Loop guard: if we keep EOFing at the same spot, stay stopped.
+                if (page.playheadSecs <= page._lastAutoResume + 2)
+                    return;
+                page._lastAutoResume = page.playheadSecs;
+                page.playAt(page.playheadSecs + 1);
+            });
+        }
+    }
+
     // Move the playhead and, if a recording covers that moment, play from it.
     function playAt(sec) {
+        page._suppressResume = false;
         page.playheadSecs = sec;
         if (page.paneCount === 4) {
             // One commit fans out to every placed pane at the same wall-clock
@@ -336,12 +370,16 @@ Item {
     function openAt(hostId, channel, timestamp) {
         // Event jump targets one specific camera and moment — single-pane flow.
         setPaneCount(1);
-        var d = new Date(timestamp * 1000);
+        // Start a couple of seconds BEFORE the event: detection timestamps mark
+        // when the alarm fired, so the moment of interest is at (or just before)
+        // the timestamp — starting exactly on it plays only the aftermath.
+        var preroll = 2;
+        var d = new Date((timestamp - preroll) * 1000);
         page.selYear = d.getFullYear();
         page.selMonth = d.getMonth() + 1;
         page.selDay = d.getDate();
         page.playheadSecs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
-        page._pendingPlayEpoch = timestamp;
+        page._pendingPlayEpoch = timestamp - preroll;
         var row = Devices.rowOfHostChannel(hostId, channel);
         if (row < 0)
             return;
@@ -390,6 +428,7 @@ Item {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
                     page._pendingPlaySecs = -1;
+                    page._suppressResume = false; // event playback crosses file boundaries too
                     var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
                     if (url.length > 0) {
                         player.expectedSize = Devices.declaredSize(page.deviceRow, false);
@@ -802,6 +841,7 @@ Item {
                     tip: playing ? qsTr("Pause") : qsTr("Play")
                     onActivated: {
                         if (playing) {
+                            page._suppressResume = true;
                             if (page.paneCount === 4) page.stopAllPanes();
                             else player.stop();
                         } else {
@@ -810,7 +850,8 @@ Item {
                     }
                 }
                 Ctl { glyph: "⏹"; tip: qsTr("Stop")
-                      onActivated: { player.stop(); page.stopAllPanes(); } }
+                      onActivated: { page._suppressResume = true;
+                                     player.stop(); page.stopAllPanes(); } }
                 // Export: save a main-stream MP4 of the moment at the playhead.
                 // Single-pane only — it targets THE camera, and grid mode has four.
                 Rectangle {
