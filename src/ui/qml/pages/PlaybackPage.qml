@@ -370,10 +370,10 @@ Item {
     function openAt(hostId, channel, timestamp) {
         // Event jump targets one specific camera and moment — single-pane flow.
         setPaneCount(1);
-        // Start a couple of seconds BEFORE the event: detection timestamps mark
-        // when the alarm fired, so the moment of interest is at (or just before)
-        // the timestamp — starting exactly on it plays only the aftermath.
-        var preroll = 2;
+        // Start a few seconds BEFORE the event: detection timestamps mark when
+        // the alarm fired, so the moment of interest is at (or just before) the
+        // timestamp — starting exactly on it plays only the aftermath.
+        var preroll = 5;
         var d = new Date((timestamp - preroll) * 1000);
         page.selYear = d.getFullYear();
         page.selMonth = d.getMonth() + 1;
