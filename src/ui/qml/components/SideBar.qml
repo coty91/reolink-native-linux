@@ -113,22 +113,34 @@ Rectangle {
             section.delegate: Rectangle {
                 id: nvrHeader
                 required property string section
-                property var host: Devices.hostInfo(parseInt(section))
+                // hostInfo() is a plain call, not a notifyable property, so a
+                // bare `host: Devices.hostInfo(...)` binding would go stale on
+                // model changes. Drive it off BOTH `section` (so a reused section
+                // delegate re-reads for its new host — the stuck-"connecting"
+                // header after a remove+re-add) AND `_rev`, bumped on every model
+                // change (so counts/status track a live host). An EMPTY map is
+                // returned for a section whose rows are momentarily absent
+                // mid-swap; it is truthy, so every `host ? host.x : …` guard
+                // slipped through and read undefined fields ("undefined ·
+                // undefined/undefined cameras"). Normalise empty to null so the
+                // guards hide the header cleanly instead.
+                property int _rev: 0
+                readonly property var host: {
+                    _rev; // re-evaluate on any model change
+                    var h = Devices.hostInfo(parseInt(section));
+                    return (h && h.channelCount !== undefined) ? h : null;
+                }
                 property bool isNvr: host && host.kind === "nvr"
                 readonly property bool inTrouble:
                     host && (host.problem === "unreachable" || host.problem === "auth"
                              || host.problem === "locked")
-                // hostInfo() is a snapshot, not a live binding — refresh it when
-                // the model changes so the header's dot, counts and name track
-                // reality instead of showing the state at first render.
                 Connections {
                     target: Devices
-                    function onDataChanged() {
-                        nvrHeader.host = Devices.hostInfo(parseInt(nvrHeader.section));
-                    }
-                    function onCountChanged() {
-                        nvrHeader.host = Devices.hostInfo(parseInt(nvrHeader.section));
-                    }
+                    function onDataChanged() { nvrHeader._rev++; }
+                    function onCountChanged() { nvrHeader._rev++; }
+                    function onRowsInserted() { nvrHeader._rev++; }
+                    function onRowsRemoved() { nvrHeader._rev++; }
+                    function onModelReset() { nvrHeader._rev++; }
                 }
                 width: ListView.view.width
                 height: isNvr ? 44 : 0
@@ -170,13 +182,18 @@ Rectangle {
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: {
-                                    if (!nvrHeader.host) return "";
+                                    var h = nvrHeader.host;
+                                    // Never string-concat a not-yet-populated host
+                                    // into "undefined · undefined/undefined": show
+                                    // its status (or connecting) until counts exist.
+                                    if (!h || h.channelCount === undefined)
+                                        return h && h.status ? h.status : qsTr("connecting…");
                                     // Lead with the problem when there is one —
                                     // "0/1 cameras" alone explains nothing.
                                     if (nvrHeader.inTrouble)
-                                        return nvrHeader.host.status;
-                                    return nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
-                                           + "/" + nvrHeader.host.channelCount + qsTr(" cameras");
+                                        return h.status;
+                                    return h.model + " · " + h.onlineCount
+                                           + "/" + h.channelCount + qsTr(" cameras");
                                 }
                                 color: nvrHeader.inTrouble ? Theme.danger : Theme.textMuted
                                 font.pixelSize: 10
@@ -213,7 +230,7 @@ Rectangle {
                                onTriggered: credsDialog.openFor(nvrHeader.host.firstRow) }
                     ThemedMenuSeparator {}
                     ThemedMenuItem { text: qsTr("Reboot NVR")
-                               enabled: nvrHeader.host && nvrHeader.host.isAdmin
+                               enabled: !!(nvrHeader.host && nvrHeader.host.isAdmin)
                                onTriggered: Devices.reboot(nvrHeader.host.firstRow) }
                     ThemedMenuItem { text: qsTr("Remove NVR")
                                onTriggered: Devices.removeDevice(nvrHeader.host.firstRow) }
