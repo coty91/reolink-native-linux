@@ -1,0 +1,82 @@
+# Build + test on every push and PR.
+#
+# Why two build jobs: the AppImage and Flatpak pin an older FFmpeg from their
+# base image/runtime, so a release can look perfectly healthy while the source
+# build is broken on a current distro — which is exactly what happened when
+# FFmpeg 8.0 flipped tls_verify's default and playback died everywhere except
+# the bundled builds. `tests` is the everyday gate; `bleeding-edge` builds
+# against Arch's newest Qt/FFmpeg so upstream changes surface here rather than
+# in an AUR user's terminal (the AUR package builds against system FFmpeg and
+# is the one channel we cannot insulate by bundling).
+name: ci
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A new push supersedes an in-flight run of the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: build + tests (Ubuntu, pinned Qt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.2'
+          modules: 'qtmultimedia qtshadertools'
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavformat-dev libavcodec-dev libavutil-dev \
+            libswscale-dev libcurl4-openssl-dev libsecret-1-dev libsqlite3-dev
+      - name: Configure + build
+        run: |
+          cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+      - name: Test
+        # Qt needs a writable runtime dir; the single-instance test puts its
+        # socket there, and offscreen keeps the GUI tests headless.
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_RUNTIME_DIR: /tmp/rt
+        run: |
+          mkdir -p /tmp/rt && chmod 700 /tmp/rt
+          ctest --test-dir build --output-on-failure
+
+  bleeding-edge:
+    # Advance warning, not a merge blocker: this tracks a rolling distro, so a
+    # break here usually means upstream moved and we have work to do — it should
+    # not wedge an unrelated PR. Check the log when it goes red.
+    name: build + tests (Arch, newest Qt/FFmpeg)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container: archlinux:latest
+    steps:
+      - name: Toolchain + newest Qt/FFmpeg
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel cmake git ninja \
+            qt6-base qt6-declarative qt6-multimedia qt6-shadertools qt6-tools \
+            ffmpeg curl libsecret sqlite
+      - uses: actions/checkout@v4
+      - name: Report the versions under test
+        run: |
+          pkg-config --modversion libavformat Qt6Core || true
+          ffmpeg -version | head -1 || true
+      - name: Configure + build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_RUNTIME_DIR: /tmp/rt
+        run: |
+          mkdir -p /tmp/rt && chmod 700 /tmp/rt
+          ctest --test-dir build --output-on-failure

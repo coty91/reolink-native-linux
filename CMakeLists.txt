@@ -143,9 +143,12 @@ endforeach()
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
-foreach(t IN ITEMS test_protocol test_database test_singleinstance)
+foreach(t IN ITEMS test_protocol test_database test_singleinstance test_tls)
     qt_add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE reolink_core Qt6::Test)
     add_test(NAME ${t} COMMAND ${t})
     set_tests_properties(${t} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endforeach()
+# test_tls stands up a TLS server and drives a real FFmpeg open on a worker
+# thread; it needs longer than the default and its own network permission.
+set_tests_properties(test_tls PROPERTIES TIMEOUT 90)
