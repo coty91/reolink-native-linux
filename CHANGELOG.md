@@ -6,6 +6,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [0.1.8] — 2026-08-12
+
+### Fixed
+
+- **Playback failed with a black screen that retried forever** on systems with
+  FFmpeg 8 or newer. Reolink devices serve HTTPS with a self-signed
+  certificate, which the app has always accepted; FFmpeg 8.0 changed its
+  default to reject it. Live view was unaffected because it uses RTSP. This
+  only ever hit builds from source (Arch and other current distros) — the
+  AppImage and Flatpak bundle an older FFmpeg — but it would have reached
+  those too as their base images move forward.
+- **Playback stopped dead at every event marker.** The NVR streams one
+  recording file per connection and stores motion events as separate files, so
+  continuous footage ended exactly where an event began. Playback now
+  continues across recording boundaries automatically.
+- **Removing a device and adding it back left its header stuck** on the first
+  camera's name and "connecting…" forever, and a re-add could briefly show
+  "undefined" in place of the camera count.
+
+### Changed
+
+- Clicking an event now starts playback **5 seconds before** the moment, so the
+  approach is visible rather than only the aftermath.
+
+### Internal
+
+- Continuous integration: every push and pull request now builds and runs the
+  test suite, including a second build against the newest Qt and FFmpeg so
+  upstream changes surface before they reach anyone building from source.
+- New regression test covering the TLS behaviour above.
+
 ## [0.1.7] — 2026-08-05
 
 ### Added
@@ -139,6 +170,7 @@ While the project is pre-1.0, minor versions may still change behaviour.
 Initial development release: live view, playback, events and device settings,
 published as an AppImage and a Flatpak bundle.
 
+[0.1.8]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.4...v0.1.5
