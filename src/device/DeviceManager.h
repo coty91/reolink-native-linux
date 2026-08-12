@@ -3,6 +3,9 @@
 #include "core/CredentialStore.h"
 #include "core/Database.h"
 #include "protocol/ReolinkApi.h"
+// Not forward-declared on purpose — see the note by the other forward
+// declarations below.
+#include "media/StreamPlayer.h"
 
 #include <QAbstractListModel>
 #include <QDateTime>
@@ -15,9 +18,21 @@
 #include <memory>
 
 namespace rl {
+// These two are only ever held behind pointers in private members and never
+// appear in a signal/slot/Q_INVOKABLE signature, so moc needs nothing from
+// them and a forward declaration is right.
+//
+// StreamPlayer is different and is INCLUDED above: it appears as a pointer
+// parameter of Q_INVOKABLE methods, so moc instantiates Qt's metatype traits
+// for rl::StreamPlayer* in its own translation unit. Qt decides
+// IsPointerToTypeDerivedFromQObject by overload resolution against QObject*,
+// which silently answers "false" for an incomplete type and "true" once the
+// class is visible — so the same template specialisation had different values
+// in the moc TU than in the TUs that include StreamPlayer.h. That is an ODR
+// violation (GCC 16 reports it as -Wsfinae-incomplete) and it left the
+// registered metatype without its PointerToQObject flag.
 class BaichuanClient;
 class ReolinkHttpClient;
-class StreamPlayer;
 }
 
 namespace rl {
