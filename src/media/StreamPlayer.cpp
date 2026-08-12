@@ -476,6 +476,16 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         av_dict_set(&opts, "analyzeduration", "500000", 0);
         av_dict_set(&opts, "probesize", "500000", 0);
     }
+    // Reolink devices serve HTTPS (playback FLV, snapshots) with a SELF-SIGNED
+    // certificate — there is no CA to validate against on a LAN appliance, and
+    // the HTTP-CGI transport has always accepted it (CURLOPT_SSL_VERIFYPEER 0).
+    // FFmpeg 8.0 flipped tls_verify's default from 0 to 1, so the media path
+    // started rejecting the same certificate the rest of the app accepts:
+    // playback died with "Peer certificate failed verification" and retried
+    // into a black screen. State the project's existing posture explicitly
+    // rather than depending on a library default that moved under us.
+    if (!packetSource && (url.startsWith("https://") || url.startsWith("rtsps://")))
+        av_dict_set(&opts, "tls_verify", "0", 0);
     int rc = avformat_open_input(&fmt, packetSource ? nullptr : url.constData(), ifmt, &opts);
     av_dict_free(&opts);
     if (rc < 0) {
