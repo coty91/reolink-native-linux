@@ -524,15 +524,22 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         AVCodecContext *ctx;
         ~DecGuard() { avcodec_free_context(&ctx); }
     } decGuard{dec};
-
     avcodec_parameters_to_context(dec, stream->codecpar);
-    dec->thread_count = 0; // auto
+
+    const bool useHwDecode = hwDecodeEnabled();
+
+    // Hardware decoding does not benefit from large FFmpeg frame-thread pools.
+    // More threads increase the NVDEC surface count; FFmpeg/NVDEC can fail
+    // when this grows beyond 32 surfaces.
+    dec->thread_count = useHwDecode ? 4 : 0;
 
     AVBufferRef *hwCtx = nullptr;
     AVPixelFormat hwPixFmt = AV_PIX_FMT_NONE;
-    if (hwDecodeEnabled())
+
+    if (useHwDecode)
         hwPixFmt = setupHwDecode(dec, codec, &hwCtx);
-    struct HwGuard {
+
+        struct HwGuard {
         AVBufferRef **ctx;
         ~HwGuard() { av_buffer_unref(ctx); }
     } hwGuard{&hwCtx};
