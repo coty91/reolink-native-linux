@@ -536,13 +536,14 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     AVBufferRef *hwCtx = nullptr;
     AVPixelFormat hwPixFmt = AV_PIX_FMT_NONE;
 
-    if (useHwDecode)
+    if (useHwDecode) {
         hwPixFmt = setupHwDecode(dec, codec, &hwCtx);
 
         struct HwGuard {
-        AVBufferRef **ctx;
-        ~HwGuard() { av_buffer_unref(ctx); }
-    } hwGuard{&hwCtx};
+            AVBufferRef **ctx;
+            ~HwGuard() { av_buffer_unref(ctx); }
+        } hwGuard{&hwCtx};
+    }
 
     if (avcodec_open2(dec, codec, nullptr) < 0) {
         // Hardware path can fail at open on some driver/profile combos; retry
